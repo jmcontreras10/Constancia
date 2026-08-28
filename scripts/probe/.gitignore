@@ -1,0 +1,6 @@
+node_modules/
+package-lock.json
+*.ogg
+*.m4a
+*.mp3
+*.wav
