@@ -1,0 +1,16 @@
+{
+  "name": "constancia-probe",
+  "private": true,
+  "type": "module",
+  "description": "Throwaway probe: does audio -> transcript -> macros work well enough to build Constancia?",
+  "scripts": {
+    "probe": "tsx probe.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.122.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "tsx": "^4.23.12"
+  }
+}

@@ -1,0 +1,678 @@
+{
+  "$comment": "Machine-readable shape of the Constancia data layer. Source of truth for the schema canvas and, later, for generated Pydantic models. Every collection carries user_id; those edges are omitted from diagrams by convention.",
+  "version": 10,
+  "zones": {
+    "plan": "What the user intends",
+    "catalog": "Identity and shared vocabulary",
+    "history": "What actually happened",
+    "intake": "Inbound, before it becomes truth",
+    "derived": "Recomputable from the above",
+    "dialogue": "What the system proposes back"
+  },
+  "collections": [
+    {
+      "name": "goals",
+      "zone": "plan",
+      "summary": "Narrative is the truth; measurables are a revisable interpretation.",
+      "refs": [
+        {
+          "field": "supersedes",
+          "to": "goals",
+          "kind": "version"
+        },
+        {
+          "field": "created_from.assessment_ids",
+          "to": "assessments",
+          "kind": "evidence"
+        },
+        {
+          "field": "notes[].assessment_id",
+          "to": "assessments",
+          "kind": "evidence"
+        }
+      ],
+      "fields": {
+        "_id": "ObjectId",
+        "user_id": "ObjectId -> users",
+        "narrative.text": "string",
+        "narrative.references": "[{ media_key: string, note: string }]",
+        "narrative.captured_at": "Date",
+        "narrative.updated_at": "Date",
+        "measurables[].kind": "\"body_weight\" | \"steps\" | \"water\" | \"strength\" | \"kcal\" | \"protein_g\" | \"carbs_g\" | \"fat_g\"",
+        "measurables[].direction": "\"up\" | \"down\" | \"hold\"",
+        "measurables[].target": "{ value: float, unit: string }",
+        "measurables[].rate": "{ value: float, unit: string, per: \"day\" | \"week\" }?",
+        "measurables[].cadence": "\"total\" | \"daily\" | \"weekly\" | \"monthly\"",
+        "measurables[].derived_from": "\"narrative\" | \"user_stated\"",
+        "measurables[].confirmed_by_user": "bool",
+        "notes[]": "{ text: string, at: Date, author: \"user\"|\"advisor\"|\"professional\", assessment_id: ObjectId? -> assessments }",
+        "priority": "int",
+        "horizon": "{ starts_on: date_str, target_date: date_str? }",
+        "status": "\"active\" | \"achieved\" | \"abandoned\" | \"superseded\"",
+        "supersedes": "ObjectId? -> goals",
+        "created_from": "{ by: \"user\"|\"advisor\"|\"professional\", reason: string, assessment_ids: ObjectId[] -> assessments, evidence: ObjectId[] -> sessions }"
+      },
+      "indexes": [
+        {
+          "keys": "(user_id, status)",
+          "kind": "compound"
+        }
+      ]
+    },
+    {
+      "name": "assessments",
+      "zone": "plan",
+      "summary": "Medical and professional input. Hard constraints outrank goals in agent prompts.",
+      "refs": [],
+      "fields": {
+        "_id": "ObjectId",
+        "user_id": "ObjectId -> users",
+        "kind": "\"body_composition\" | \"blood_panel\" | \"consult\" | \"imaging\" | \"other\"",
+        "provider": "{ name: string, role: \"nutritionist\"|\"sports_medicine\"|\"physio\"|\"lab\"|\"self\" }",
+        "taken_on": "date_str",
+        "summary": "string",
+        "measurements[]": "{ metric: string, value: float, unit: string }",
+        "recommendations": "string[]",
+        "constraints[]": "{ text: string, until: date_str?, hard: bool }",
+        "attachments[]": "{ media_key: string, mime: string }",
+        "created_at": "Date",
+        "source": "\"user_reported\" | \"document\" | \"manual_entry\"  // a verbal report is weaker evidence than an uploaded lab report"
+      },
+      "indexes": [
+        {
+          "keys": "(user_id, taken_on -1)",
+          "kind": "compound"
+        },
+        {
+          "keys": "(user_id, constraints.until)",
+          "kind": "compound"
+        }
+      ]
+    },
+    {
+      "name": "routines",
+      "zone": "plan",
+      "summary": "Versioned training plan. User-named days, no load targets.",
+      "refs": [
+        {
+          "field": "supersedes",
+          "to": "routines",
+          "kind": "version"
+        },
+        {
+          "field": "days[].planned_exercises[].exercise_id",
+          "to": "exercise_library",
+          "kind": "ref"
+        },
+        {
+          "field": "created_from.evidence",
+          "to": "sessions",
+          "kind": "evidence"
+        }
+      ],
+      "fields": {
+        "_id": "ObjectId",
+        "user_id": "ObjectId -> users",
+        "name": "string",
+        "starts_on": "date_str",
+        "ends_on": "date_str?",
+        "status": "\"active\" | \"archived\" | \"draft\"",
+        "supersedes": "ObjectId? -> routines",
+        "created_from": "{ by: \"user\"|\"advisor\", reason: string, evidence: ObjectId[] -> sessions }",
+        "days[].key": "string  // stable, minted once, never changes",
+        "days[].label": "string  // display, editable",
+        "days[].aliases": "string[]",
+        "days[].order": "int",
+        "days[].planned_exercises[].exercise_id": "ObjectId -> exercise_library",
+        "days[].planned_exercises[].order": "int",
+        "days[].planned_exercises[].target_sets": "int",
+        "days[].planned_exercises[].target_reps": "[int, int]?",
+        "days[].planned_exercises[].target_seconds": "int?",
+        "days[].planned_exercises[].required": "bool"
+      },
+      "indexes": [
+        {
+          "keys": "(user_id, status, starts_on -1)",
+          "kind": "compound"
+        }
+      ]
+    },
+    {
+      "name": "users",
+      "zone": "catalog",
+      "summary": "Auth, WhatsApp link, timezone. Phone number is the chat credential.",
+      "refs": [
+        {
+          "field": "active_routine_id",
+          "to": "routines",
+          "kind": "ref"
+        }
+      ],
+      "fields": {
+        "_id": "ObjectId",
+        "email": "string",
+        "hashed_password": "string",
+        "name": "string",
+        "whatsapp_phone": "string?  // E.164",
+        "is_active": "bool",
+        "created_at": "Date",
+        "active_routine_id": "ObjectId? -> routines",
+        "profile": "{ timezone: string, units: \"metric\"|\"imperial\", daily_spend_cap_usd: float, language: { primary: \"en\", secondary: \"es\"?, show_both: bool } }"
+      },
+      "indexes": [
+        {
+          "keys": "email",
+          "kind": "unique"
+        },
+        {
+          "keys": "whatsapp_phone",
+          "kind": "unique sparse"
+        }
+      ]
+    },
+    {
+      "name": "exercise_library",
+      "zone": "catalog",
+      "summary": "Global catalog of anything you can DO — strength, cardio, sport, mobility, mindfulness. English canonical, Spanish secondary.",
+      "refs": [],
+      "fields": {
+        "_id": "ObjectId",
+        "scope": "\"global\" | \"user\"",
+        "user_id": "ObjectId?  // set only when scope = \"user\"",
+        "slug": "string  // unique idx, English-derived",
+        "name": "{ en: string, es: string? }  // en is canonical, always present",
+        "muscle_groups": "string[]  // empty for sport and mindfulness",
+        "equipment": "string?",
+        "default_load.type": "\"absolute\" | \"assist_inverted\" | \"bodyweight\" | \"bodyweight_plus\" | \"band\" | \"time\" | \"distance\" | \"none\"",
+        "default_load.better": "\"higher\" | \"lower\"",
+        "aliases_global": "{ en: string[], es: string[] }",
+        "category": "\"strength\" | \"cardio\" | \"sport\" | \"mobility\" | \"mindfulness\"",
+        "met": "float?  // activity kcal estimates",
+        "seed_source": "\"free-exercise-db\" | \"constancia\" | \"user\""
+      },
+      "indexes": [
+        {
+          "keys": "slug",
+          "kind": "unique"
+        },
+        {
+          "keys": "name.*, aliases_global",
+          "kind": "text"
+        }
+      ]
+    },
+    {
+      "name": "user_exercises",
+      "zone": "catalog",
+      "summary": "Per-user overlay: aliases and local machine calibration.",
+      "refs": [
+        {
+          "field": "exercise_id",
+          "to": "exercise_library",
+          "kind": "ref"
+        }
+      ],
+      "fields": {
+        "_id": "ObjectId",
+        "user_id": "ObjectId -> users",
+        "exercise_id": "ObjectId -> exercise_library",
+        "aliases[]": "{ text: string, lang: \"en\"|\"es\", hits: int, last_seen: Date, source: \"confirmed\"|\"inferred\" }  // max 12, evict lowest hits",
+        "load.type": "same enum as exercise_library.default_load.type",
+        "load.unit": "\"kg\" | \"lb\" | \"level\" | \"s\" | \"m\"",
+        "load.per_side": "bool",
+        "load.scale": "{ min: int, max: int, better: \"higher\"|\"lower\" }?",
+        "last_used_at": "Date",
+        "use_count": "int"
+      },
+      "indexes": [
+        {
+          "keys": "(user_id, exercise_id)",
+          "kind": "unique"
+        },
+        {
+          "keys": "(user_id, aliases.text)",
+          "kind": "compound"
+        }
+      ]
+    },
+    {
+      "name": "sessions",
+      "zone": "history",
+      "summary": "strength | cardio | recovery. One collection, discriminated by type.",
+      "refs": [
+        {
+          "field": "routine_ref.routine_id",
+          "to": "routines",
+          "kind": "ref"
+        },
+        {
+          "field": "exercises[].exercise_id",
+          "to": "exercise_library",
+          "kind": "ref"
+        },
+        {
+          "field": "exercises[].substitute_for",
+          "to": "exercise_library",
+          "kind": "ref"
+        },
+        {
+          "field": "source_message_ids",
+          "to": "messages",
+          "kind": "provenance"
+        },
+        {
+          "field": "detail.activity_id",
+          "to": "exercise_library",
+          "kind": "ref"
+        }
+      ],
+      "fields": {
+        "_id": "ObjectId",
+        "user_id": "ObjectId -> users",
+        "type": "\"strength\" | \"cardio\" | \"recovery\"",
+        "date_key": "date_str",
+        "tz": "string",
+        "logged_at": "Date",
+        "routine_ref": "{ routine_id: ObjectId -> routines, day_key: string }?",
+        "location_note": "string?",
+        "adherence": "{ planned: int, completed: int, substituted: int, skipped: int, unplanned: int }?",
+        "exercises[].exercise_id": "ObjectId -> exercise_library",
+        "exercises[].order": "int",
+        "exercises[].planned": "bool",
+        "exercises[].substitute_for": "ObjectId? -> exercise_library",
+        "exercises[].sets[]": "{ order: int, reps: int?, seconds: int?, load: { value: float, unit: string }?, load_kg: float?, rir: int?, note: string? }",
+        "detail": "{ activity_id: ObjectId -> exercise_library, duration_min: int, distance_km: float?, intensity: \"low\"|\"moderate\"|\"high\" }?  // type != strength",
+        "source_excerpt": "string",
+        "source_message_ids": "ObjectId[] -> messages"
+      },
+      "indexes": [
+        {
+          "keys": "(user_id, date_key -1)",
+          "kind": "compound"
+        },
+        {
+          "keys": "(user_id, type, date_key -1)",
+          "kind": "compound"
+        },
+        {
+          "keys": "(user_id, exercises.exercise_id)",
+          "kind": "compound"
+        }
+      ]
+    },
+    {
+      "name": "daily_metrics",
+      "zone": "history",
+      "summary": "Weight, steps, water, sleep. aggregation decides sum vs. point.",
+      "refs": [
+        {
+          "field": "source_id",
+          "to": "assessments",
+          "kind": "provenance"
+        },
+        {
+          "field": "source_message_ids",
+          "to": "messages",
+          "kind": "provenance"
+        }
+      ],
+      "fields": {
+        "_id": "ObjectId",
+        "user_id": "ObjectId -> users",
+        "date_key": "date_str",
+        "tz": "string",
+        "metric": "\"body_weight\" | \"steps\" | \"water\" | \"sleep\" | \"resting_hr\" | \"body_fat_pct\"",
+        "value": "float",
+        "unit": "\"kg\" | \"count\" | \"L\" | \"h\" | \"bpm\" | \"%\"",
+        "aggregation": "\"point\" | \"daily_total\"  // daily_total SUMS across the day; point does not",
+        "measured_at": "Date",
+        "context": "{ fasted: bool? }?",
+        "source": "\"whatsapp\" | \"assessment\" | \"healthkit\" | \"manual\"",
+        "source_id": "ObjectId? -> assessments",
+        "source_message_ids": "ObjectId[] -> messages"
+      },
+      "indexes": [
+        {
+          "keys": "(user_id, metric, date_key -1)",
+          "kind": "compound"
+        }
+      ]
+    },
+    {
+      "name": "messages",
+      "zone": "intake",
+      "summary": "Raw inbound, TTL 90 days. Voice notes are transcribed once on arrival; the audio itself never reaches the LLM.",
+      "refs": [
+        {
+          "field": "draft_id",
+          "to": "entry_drafts",
+          "kind": "ref"
+        }
+      ],
+      "fields": {
+        "_id": "ObjectId",
+        "user_id": "ObjectId?  // null before /link",
+        "channel": "\"whatsapp\"",
+        "direction": "\"in\" | \"out\"",
+        "provider_message_id": "string",
+        "body": "string",
+        "media[]": "{ key: string, mime: string, duration_s: int?, transcript: string?, transcript_lang: \"es\"|\"en\", transcribed_at: Date? }",
+        "received_at": "Date",
+        "processed_at": "Date?",
+        "draft_id": "ObjectId? -> entry_drafts"
+      },
+      "indexes": [
+        {
+          "keys": "provider_message_id",
+          "kind": "unique"
+        },
+        {
+          "keys": "received_at",
+          "kind": "TTL 90d"
+        }
+      ]
+    },
+    {
+      "name": "entry_drafts",
+      "zone": "intake",
+      "summary": "The completeness gate and the only conversation state.",
+      "refs": [
+        {
+          "field": "source_message_ids",
+          "to": "messages",
+          "kind": "provenance"
+        },
+        {
+          "field": "commits_to",
+          "to": "sessions",
+          "kind": "commit"
+        },
+        {
+          "field": "commits_to",
+          "to": "daily_metrics",
+          "kind": "commit"
+        }
+      ],
+      "fields": {
+        "_id": "ObjectId",
+        "user_id": "ObjectId -> users",
+        "status": "\"awaiting_input\" | \"awaiting_confirmation\" | \"committed\" | \"discarded\" | \"expired\"",
+        "intent": "\"workout\" | \"meal\" | \"meal_template\" | \"body_metric\" | \"assessment\" | \"routine_edit\" | \"question\"",
+        "payload": "object  // partial target entity",
+        "missing[]": "{ path: string, ask_es: string }",
+        "unresolved[]": "{ text: string, candidates: [{ exercise_id: ObjectId, score: float }], action: \"confirm_or_create\" }",
+        "asked": "string[]",
+        "questions_left": "int",
+        "source_message_ids": "ObjectId[] -> messages",
+        "commits_to": "{ collection: string, _id: ObjectId? }",
+        "expires_at": "Date"
+      },
+      "indexes": [
+        {
+          "keys": "(user_id, status)",
+          "kind": "compound"
+        },
+        {
+          "keys": "expires_at",
+          "kind": "TTL 12h"
+        }
+      ]
+    },
+    {
+      "name": "daily_summaries",
+      "zone": "derived",
+      "summary": "Materialized per user per day. Safe to drop and rebuild.",
+      "refs": [
+        {
+          "field": "aggregates",
+          "to": "sessions",
+          "kind": "aggregate"
+        },
+        {
+          "field": "aggregates",
+          "to": "daily_metrics",
+          "kind": "aggregate"
+        }
+      ],
+      "fields": {
+        "_id": "ObjectId",
+        "user_id": "ObjectId -> users",
+        "date_key": "date_str",
+        "trained": "bool",
+        "session_types": "string[]",
+        "muscle_groups": "string[]",
+        "metrics": "{ body_weight: float?, steps: int?, water_l: float?, sleep_h: float? }",
+        "macros": "{ kcal: float, protein_g: float, carbs_g: float, fat_g: float }",
+        "adherence_pct": "float?",
+        "computed_at": "Date"
+      },
+      "indexes": [
+        {
+          "keys": "(user_id, date_key)",
+          "kind": "unique"
+        }
+      ]
+    },
+    {
+      "name": "model_calls",
+      "zone": "derived",
+      "summary": "One cost ledger for every paid external call — LLM and speech-to-text alike, so the per-user spend cap covers both.",
+      "refs": [],
+      "fields": {
+        "_id": "ObjectId",
+        "user_id": "ObjectId -> users",
+        "task_name": "string  // must exist in TASK_ROUTES",
+        "model_used": "string",
+        "input_tokens": "int?  // null for audio",
+        "output_tokens": "int?",
+        "cost_usd": "float",
+        "latency_ms": "int",
+        "success": "bool",
+        "fallback_used": "bool",
+        "error_type": "string?",
+        "timestamp": "Date",
+        "provider": "\"anthropic\" | \"stt\" | \"other\"",
+        "audio_seconds": "float?  // STT bills by duration, not tokens"
+      },
+      "indexes": [
+        {
+          "keys": "(user_id, timestamp -1)",
+          "kind": "compound"
+        },
+        {
+          "keys": "timestamp",
+          "kind": "TTL 90d"
+        }
+      ]
+    },
+    {
+      "name": "proposals",
+      "zone": "dialogue",
+      "summary": "An outgoing suggested plan change awaiting the user's answer. Mirrors entry_drafts, which is the state for incoming data.",
+      "fields": {
+        "_id": "ObjectId",
+        "user_id": "ObjectId -> users",
+        "trigger": "{ kind: \"new_assessment\"|\"deviation\"|\"goal_conflict\"|\"scheduled_review\", assessment_id: ObjectId? -> assessments, evidence: ObjectId[] -> sessions }",
+        "rationale": "string  // why, in the user's language",
+        "changes[]": "{ target: \"goal\"|\"routine\"|\"diet\", target_id: ObjectId, summary: string, patch: object }",
+        "status": "\"pending\" | \"accepted\" | \"rejected\" | \"partially_accepted\" | \"expired\"",
+        "asked_at": "Date",
+        "responded_at": "Date?",
+        "outcome_ids": "ObjectId[]  // new versions created on accept",
+        "expires_at": "Date  // TTL, never nag forever"
+      },
+      "refs": [
+        {
+          "field": "trigger.assessment_id",
+          "to": "assessments",
+          "kind": "evidence"
+        },
+        {
+          "field": "trigger.evidence",
+          "to": "sessions",
+          "kind": "evidence"
+        },
+        {
+          "field": "changes[].target_id",
+          "to": "goals",
+          "kind": "ref"
+        },
+        {
+          "field": "changes[].target_id",
+          "to": "routines",
+          "kind": "ref"
+        }
+      ],
+      "indexes": [
+        {
+          "keys": "(user_id, status)",
+          "kind": "compound"
+        },
+        {
+          "keys": "expires_at",
+          "kind": "TTL"
+        }
+      ]
+    },
+    {
+      "name": "meal_templates",
+      "zone": "catalog",
+      "summary": "A named dish you eat repeatedly, with macros already worked out. Always user-scoped — food is personal, so there is no global library.",
+      "fields": {
+        "_id": "ObjectId",
+        "user_id": "ObjectId -> users  // ALWAYS scoped, never global",
+        "name": "string  // \"desayuno clásico\"",
+        "aliases[]": "{ text: string, lang: \"en\"|\"es\", hits: int, last_seen: Date, source: \"confirmed\"|\"inferred\" }  // max 12",
+        "description": "string  // the user's own words, verbatim",
+        "macros": "{ kcal: float, protein_g: float, carbs_g: float, fat_g: float }",
+        "basis": "\"weighed\" | \"label\" | \"agent_estimate\" | \"user_stated\"",
+        "evidence[]": "{ kind: \"nutrition_label\"|\"recipe\"|\"plate\", extracted: object, media_key: string?, read_at: Date }",
+        "tags": "string[]  // meal_prep | restaurant | home",
+        "created_by": "\"user\" | \"promotion\"  // named outright, or emerged from repeats",
+        "confirmed_count": "int",
+        "last_used_at": "Date",
+        "use_count": "int"
+      },
+      "refs": [],
+      "indexes": [
+        {
+          "keys": "(user_id, name)",
+          "kind": "unique"
+        },
+        {
+          "keys": "(user_id, aliases.text)",
+          "kind": "compound"
+        },
+        {
+          "keys": "(user_id, last_used_at -1)",
+          "kind": "compound"
+        }
+      ]
+    },
+    {
+      "name": "meals",
+      "zone": "history",
+      "summary": "One thing eaten. Macros are copied onto it, never read through the template, so correcting a template never rewrites history.",
+      "fields": {
+        "_id": "ObjectId",
+        "user_id": "ObjectId -> users",
+        "date_key": "date_str",
+        "tz": "string",
+        "eaten_at": "Date",
+        "template_id": "ObjectId? -> meal_templates  // null = a one-off",
+        "portions": "float  // 1.0 default; doble = 2, media porción = 0.5",
+        "description": "string  // the user's words, verbatim",
+        "macros": "{ kcal: float, protein_g: float, carbs_g: float, fat_g: float }  // COPIED, never referenced",
+        "basis": "\"template\" | \"weighed\" | \"described\" | \"photo_estimate\" | \"user_stated\"",
+        "meal_type": "\"breakfast\" | \"lunch\" | \"dinner\" | \"snack\"?",
+        "photo_key": "string?  // short TTL — decoration once the estimate exists",
+        "source_excerpt": "string",
+        "source_message_ids": "ObjectId[] -> messages"
+      },
+      "refs": [
+        {
+          "field": "template_id",
+          "to": "meal_templates",
+          "kind": "ref"
+        },
+        {
+          "field": "source_message_ids",
+          "to": "messages",
+          "kind": "provenance"
+        }
+      ],
+      "indexes": [
+        {
+          "keys": "(user_id, date_key -1)",
+          "kind": "compound"
+        },
+        {
+          "keys": "(user_id, template_id)",
+          "kind": "compound"
+        }
+      ]
+    }
+  ],
+  "notation": {
+    "scalars": [
+      "ObjectId",
+      "string",
+      "int",
+      "float",
+      "bool",
+      "Date"
+    ],
+    "date_str": "\"YYYY-MM-DD\", user-local calendar day",
+    "?": "nullable or absent",
+    "[]": "array",
+    "\"a\" | \"b\"": "enum of exact stored values",
+    "-> collection": "reference to another collection"
+  },
+  "miro_board": "https://miro.com/app/board/uXjVHt4aWiM=/",
+  "language_policy": {
+    "primary": "en",
+    "note": "English is canonical for every resource name — exercises, sports, units. Spanish is a secondary display and matching layer. Users can show both.",
+    "secondary_optional": true
+  },
+  "media_policy": {
+    "principle": "Voice is the best meal input. Photos build templates. Text logs meals.",
+    "rules": [
+      "A nutrition label or recipe photo is extraction — high accuracy, done once at template creation.",
+      "A plate photo is estimation — a guess, and the one that would recur daily.",
+      "Never refuse a photo. Make the template path faster instead.",
+      "Cache by image hash so a resent or retried photo never re-bills.",
+      "Over the daily spend cap, degrade to the nightly Batch API rather than declining.",
+      "Keep extracted numbers plus a thumbnail on templates; full-resolution originals are optional.",
+      "Plate photos on one-off meals get a short TTL like message media.",
+      "Transcribe a voice note once on arrival, store the transcript on the media entry, then treat it as ordinary text — the audio never reaches the LLM.",
+      "Pin the transcription language from users.profile.language rather than auto-detecting; mixed Spanish and English breaks detection.",
+      "Numbers are what speech-to-text gets wrong, and numbers are what matter. Echo the quantities heard back, not just the computed result."
+    ],
+    "input_ranking": [
+      "1. Template name — free, instant, exact.",
+      "2. Voice note — cheap to transcribe, and people say quantities aloud that they would never type. Best quality per unit of effort.",
+      "3. Typed text — same pipeline as voice, but shorter and vaguer because typing is work.",
+      "4. Plate photo — most expensive, least accurate. Fallback, not default.",
+      "Label and recipe photos sit outside this ranking: extraction, not estimation, and they belong at template creation."
+    ]
+  },
+  "precision_policy": {
+    "principle": "Reward precision, never require it. Ask for weights at template creation, not at logging.",
+    "rules": [
+      "A vague meal is logged first, then optionally refined — logging never blocks on a question.",
+      "basis records why a number is what it is: weighed beats described beats photo_estimate.",
+      "At most one precision nudge per day, so it cannot become an interrogation."
+    ]
+  },
+  "transcription": {
+    "decision": "Hosted API with its own key, not self-hosted whisper.",
+    "component": "A dedicated audio agent whose only job is audio -> text.",
+    "rules": [
+      "The audio agent transcribes and stops. It never interprets — once it is text, the existing triage/resolve/draft path handles meaning, so there is only ever one interpretation path to debug.",
+      "It may return per-word confidence or alternatives for numbers; the confirmation message highlights the uncertain quantity.",
+      "Language is pinned from users.profile.language, never auto-detected.",
+      "Every call is logged to model_calls with provider 'stt' and audio_seconds, so transcription counts against the same per-user spend cap as the LLM.",
+      "The backend sits behind an adapter like the LLM gateway, so it is swappable without touching the pipeline."
+    ]
+  }
+}
